@@ -108,10 +108,8 @@ void WifiBoard::OnNetworkEvent(NetworkEvent event, const std::string& data) {
         case NetworkEvent::Connected:
             // Stop timeout timer
             esp_timer_stop(connect_timer_);
-#ifdef CONFIG_USE_ESP_BLUFI_WIFI_PROVISIONING
-            // make sure blufi resources has been released
-            Blufi::GetInstance().deinit();
-#endif
+            // BluFi reports the connection result before disconnecting BLE and
+            // releasing its own resources in the BLE disconnect callback.
             in_config_mode_ = false;
             ESP_LOGI(TAG, "Connected to WiFi: %s", data.c_str());
             break;

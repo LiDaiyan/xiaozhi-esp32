@@ -72,7 +72,7 @@ private:
     // 初始化音频功放引脚并默认关闭功放
     void InitializeAudioAmplifier()
     {
-        gpio_config_t io_conf;
+        gpio_config_t io_conf = {};
         io_conf.intr_type = GPIO_INTR_DISABLE;
         io_conf.mode = GPIO_MODE_OUTPUT;
         io_conf.pin_bit_mask = (1ULL << AUDIO_CODEC_PA_PIN);

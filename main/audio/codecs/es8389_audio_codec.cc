@@ -214,7 +214,13 @@ int Es8389AudioCodec::Read(int16_t *dest, int samples)
 {
     if (input_enabled_)
     {
-        ESP_ERROR_CHECK_WITHOUT_ABORT(esp_codec_dev_read(input_dev_, (void *)dest, samples * sizeof(int16_t)));
+        int ret = esp_codec_dev_read(input_dev_, (void *)dest, samples * sizeof(int16_t));
+        if (ret != ESP_CODEC_DEV_OK) {
+            ESP_LOGE(TAG, "Microphone read failed: %d", ret);
+            return 0;
+        }
+    } else {
+        return 0;
     }
     return samples;
 }
@@ -223,7 +229,13 @@ int Es8389AudioCodec::Write(const int16_t *data, int samples)
 {
     if (output_enabled_)
     {
-        ESP_ERROR_CHECK_WITHOUT_ABORT(esp_codec_dev_write(output_dev_, (void *)data, samples * sizeof(int16_t)));
+        int ret = esp_codec_dev_write(output_dev_, (void *)data, samples * sizeof(int16_t));
+        if (ret != ESP_CODEC_DEV_OK) {
+            ESP_LOGE(TAG, "Speaker write failed: %d", ret);
+            return 0;
+        }
+    } else {
+        return 0;
     }
     return samples;
 }

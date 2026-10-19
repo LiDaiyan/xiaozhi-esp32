@@ -1,4 +1,6 @@
 #include "blufi.h"
+#include "cJSON.h"
+#include "system_info.h"
 #include <algorithm>
 #include <cassert>
 #include <cstring>
@@ -720,8 +722,14 @@ void Blufi::_handle_event(esp_blufi_cb_event_t event, esp_blufi_cb_param_t* para
         }
         case ESP_BLUFI_EVENT_REQ_CONNECT_TO_AP: {
             ESP_LOGI(BLUFI_TAG, "BLUFI request wifi connect to AP via esp-wifi-connect");
-            std::string ssid(reinterpret_cast<const char*>(m_sta_config.sta.ssid));
-            std::string password(reinterpret_cast<const char*>(m_sta_config.sta.password));
+            const char* ssid_data = reinterpret_cast<const char*>(m_sta_config.sta.ssid);
+            const char* password_data = reinterpret_cast<const char*>(m_sta_config.sta.password);
+            std::string ssid(ssid_data, strnlen(ssid_data, sizeof(m_sta_config.sta.ssid)));
+            std::string password(password_data, strnlen(password_data, sizeof(m_sta_config.sta.password)));
+            if (ssid.empty()) {
+                esp_blufi_send_error_info(ESP_BLUFI_DATA_FORMAT_ERROR);
+                break;
+            }
 
             SsidManager::GetInstance().AddSsid(ssid, password);
             m_scan_should_save_ssid = false;
@@ -797,9 +805,8 @@ void Blufi::_handle_event(esp_blufi_cb_event_t event, esp_blufi_cb_param_t* para
                                                         softap_conn_num, &info);
                         ESP_LOGI(BLUFI_TAG, "connected to WiFi");
 
-                        if (self->m_ble_is_connected) {
-                            esp_blufi_disconnect();
-                        }
+                        // Keep BLE until the phone receives the result and closes
+                        // the connection. BLE_DISCONNECT then releases BluFi.
                     } else {
                         self->m_sta_is_connecting = false;
                         self->m_sta_connected = false;
@@ -859,22 +866,71 @@ void Blufi::_handle_event(esp_blufi_cb_event_t event, esp_blufi_cb_param_t* para
             ESP_LOGI(BLUFI_TAG, "BLUFI get wifi status");
             break;
         }
+        case ESP_BLUFI_EVENT_RECV_CUSTOM_DATA: {
+            // Query business Device-Id before Wi-Fi provisioning releases BLE.
+            if (!param->custom_data.data || param->custom_data.data_len <= 0 ||
+                param->custom_data.data_len > 256) {
+                esp_blufi_send_error_info(ESP_BLUFI_DATA_FORMAT_ERROR);
+                break;
+            }
+            cJSON* request = cJSON_ParseWithLength(
+                reinterpret_cast<const char*>(param->custom_data.data),
+                param->custom_data.data_len);
+            const cJSON* cmd = request ? cJSON_GetObjectItemCaseSensitive(request, "cmd") : nullptr;
+            const bool get_info = cJSON_IsString(cmd) &&
+                strcmp(cmd->valuestring, "get_device_info") == 0;
+            cJSON_Delete(request);
+            if (!get_info) {
+                esp_blufi_send_error_info(ESP_BLUFI_DATA_FORMAT_ERROR);
+                break;
+            }
+            cJSON* response = cJSON_CreateObject();
+            if (!response) {
+                break;
+            }
+            cJSON_AddStringToObject(response, "type", "device_info");
+            cJSON_AddStringToObject(response, "deviceid", SystemInfo::GetMacAddress().c_str());
+            cJSON_AddStringToObject(response, "name", BLUFI_DEVICE_NAME);
+            char* json = cJSON_PrintUnformatted(response);
+            if (json) {
+                esp_err_t ret = esp_blufi_send_custom_data(
+                    reinterpret_cast<uint8_t*>(json), strlen(json));
+                if (ret != ESP_OK) {
+                    ESP_LOGW(BLUFI_TAG, "Failed to send device info: %s", esp_err_to_name(ret));
+                }
+                cJSON_free(json);
+            }
+            cJSON_Delete(response);
+            break;
+        }
         case ESP_BLUFI_EVENT_RECV_STA_BSSID:
             memcpy(m_sta_config.sta.bssid, param->sta_bssid.bssid, 6);
             m_sta_config.sta.bssid_set = true;
             ESP_LOGI(BLUFI_TAG, "Recv STA BSSID");
             break;
         case ESP_BLUFI_EVENT_RECV_STA_SSID:
-            strncpy((char*)m_sta_config.sta.ssid, (char*)param->sta_ssid.ssid,
-                    param->sta_ssid.ssid_len);
-            m_sta_config.sta.ssid[param->sta_ssid.ssid_len] = '\0';
-            ESP_LOGI(BLUFI_TAG, "Recv STA SSID: %s", m_sta_config.sta.ssid);
+            if (!param->sta_ssid.ssid || param->sta_ssid.ssid_len <= 0 ||
+                param->sta_ssid.ssid_len > static_cast<int>(sizeof(m_sta_config.sta.ssid))) {
+                esp_blufi_send_error_info(ESP_BLUFI_DATA_FORMAT_ERROR);
+                break;
+            }
+            memset(m_sta_config.sta.ssid, 0, sizeof(m_sta_config.sta.ssid));
+            memcpy(m_sta_config.sta.ssid, param->sta_ssid.ssid, param->sta_ssid.ssid_len);
+            ESP_LOGI(BLUFI_TAG, "Received WiFi SSID (%d bytes)", param->sta_ssid.ssid_len);
             break;
         case ESP_BLUFI_EVENT_RECV_STA_PASSWD:
-            strncpy((char*)m_sta_config.sta.password, (char*)param->sta_passwd.passwd,
-                    param->sta_passwd.passwd_len);
-            m_sta_config.sta.password[param->sta_passwd.passwd_len] = '\0';
-            ESP_LOGI(BLUFI_TAG, "Recv STA PASSWORD : %s", m_sta_config.sta.password);
+            if (param->sta_passwd.passwd_len < 0 ||
+                param->sta_passwd.passwd_len > static_cast<int>(sizeof(m_sta_config.sta.password)) ||
+                (param->sta_passwd.passwd_len > 0 && !param->sta_passwd.passwd)) {
+                esp_blufi_send_error_info(ESP_BLUFI_DATA_FORMAT_ERROR);
+                break;
+            }
+            memset(m_sta_config.sta.password, 0, sizeof(m_sta_config.sta.password));
+            if (param->sta_passwd.passwd_len > 0) {
+                memcpy(m_sta_config.sta.password, param->sta_passwd.passwd,
+                       param->sta_passwd.passwd_len);
+            }
+            ESP_LOGI(BLUFI_TAG, "Received WiFi password");
             break;
         case ESP_BLUFI_EVENT_GET_WIFI_LIST: {
             ESP_LOGI(BLUFI_TAG, "BLUFI get wifi list");
