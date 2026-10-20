@@ -2,12 +2,14 @@ menu "Xiaozhi Assistant"
 
 config OTA_URL
     string "Default OTA URL"
+    default "http://124.133.228.67:8002/xiaozhi/ota/" if BOARD_TYPE_FOGSEEK_NANO_V2
     default "https://api.tenclass.net/xiaozhi/ota/"
     help
         The application will access this URL to check for new firmwares and server address.
 
 config PROJECT_ID
     string "Project ID"
+    default "zhiban" if BOARD_TYPE_FOGSEEK_NANO_V2
     default ""
     help
         Optional project identifier sent as the Project-Id HTTP header to the OTA server.
@@ -156,6 +158,7 @@ config XIAOZHI_USE_ETHERNET
 choice BOARD_TYPE
     prompt "Board Type"
     depends on XIAOZHI_NETWORK_WIFI
+    default BOARD_TYPE_FOGSEEK_NANO_V2 if IDF_TARGET_ESP32S3
     default BOARD_TYPE_BREAD_COMPACT_WIFI
     help
         Board type. 开发板类型
@@ -1251,6 +1254,19 @@ menu "WiFi Configuration Method"
         select BT_BLE_BLUFI_ENABLE
         select MBEDTLS_DHM_C
 endmenu
+
+# Board-specific defaults for symbols defined by ESP-SR and ESP-IDF.
+# Keep these dependencies within the components' original dependencies.
+if BOARD_TYPE_FOGSEEK_NANO_V2
+
+config SR_WN_WN9_HAIXIAOWU_TTS
+    default y
+
+config BT_BLE_50_FEATURES_SUPPORTED
+    default n
+    depends on BT_BLUEDROID_ENABLED && BT_BLE_ENABLED && ((BT_CONTROLLER_ENABLED && SOC_BLE_50_SUPPORTED) || BT_CONTROLLER_DISABLED)
+
+endif
 
 config AUDIO_DEBUG_UDP_SERVER
     string "Audio Debug UDP Server Address"

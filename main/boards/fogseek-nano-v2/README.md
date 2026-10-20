@@ -1,4 +1,4 @@
-# 雾岸科技 Nano-V2 开发板
+# 雾岸科技 Nano 开发板
 
 ## 产品概述
 
@@ -43,55 +43,11 @@ Nano 是一款采用"核心板+扩展板"模块化架构的智能硬件开发平
 
 ### 快速构建
 ```bash
-python scripts/release.py fogseek-nano-v2
+python scripts/release.py fogseek-Nano
 ```
 
 ### menuconfig 配置
 在菜单配置中选择 "雾岸科技 Nano" 板子类型。
-
-### 蓝牙 Wi-Fi 配网
-
-Nano-V2 默认使用 BluFi（BLE）接收 Wi-Fi 名称和密码，关闭热点网页配网。
-首次启动且没有保存的 Wi-Fi，或自动连接超过 60 秒未成功时，进入蓝牙配网。
-已保存 Wi-Fi 的设备正常开机仍自动联网，不会每次开机进入配网。
-
-配网时使用 EspBlufi App 或实现 BluFi 协议的小程序连接 `Xiaozhi-Blufi`，
-发送 Wi-Fi 名称、密码和连接请求。设备返回连接结果；成功后由手机主动断开蓝牙，设备释放资源，
-失败时可重新提交。Wi-Fi 凭据保存在 NVS，重启后自动使用。
-小程序需要实现 BluFi 的协议帧、分包和通知处理，不能直接发送任意 JSON。
-连接并启用通知后，小程序通过 BluFi Custom Data 发送
-`{"cmd":"get_device_info"}`，设备返回
-`{"type":"device_info","deviceid":"aa:bb:cc:dd:ee:ff","name":"Xiaozhi-Blufi"}`。
-`deviceid` 是 Wi-Fi STA MAC，与 OTA 的 `Device-Id` 一致。
-设备信息应在发送 Wi-Fi 凭据前读取，用户绑定由小程序和服务端处理。
-
-已有 sdkconfig 的工作目录需确认关闭 `Hotspot`、开启 `Esp Blufi`，
-并选择 Bluedroid 蓝牙协议栈；板级发布配置已包含这些选项。
-
-### 项目标识
-
-OTA 请求通过 `Project-Id` 请求头发送 `CONFIG_PROJECT_ID`。
-Nano-V2 的板级发布配置使用 `zhiban`，本地编译可在 `sdkconfig` 或
-`menuconfig → Xiaozhi Assistant → Project ID` 中设置。
-
-### 按键与指示灯
-
-业务按键为 GPIO18（CTRL），低电平有效。GPIO0（BOOT）也被初始化，
-但 Nano-V2 未给它注册业务回调。
-
-| 操作 | 行为 |
-|---|---|
-| 短按 | 空闲时启动对话；播报时打断；监听时关闭音频通道；配网时切换音频测试 |
-| 双击 | 仅在启动状态进入配网，其他状态无动作 |
-| 长按约 1.5 秒 | 切换开关机；开机后等待设备就绪并自动唤醒对话 |
-
-绿灯表示运行状态：空闲时呼吸，监听时常亮，播报时按 800ms 间隔闪烁，
-启动/配网/连接/激活/升级/音频测试时按 200ms 间隔闪烁，致命错误时按 100ms 间隔闪烁。
-充电待机或关机时，绿灯关闭。
-
-红灯表示电源状态：充电时呼吸，充满时常亮，低电量时按 100ms 间隔闪烁，
-正常电池供电时关闭。开机状态下红灯通常调低亮度；USB 供电时长按关机回到充电待机，
-所以红灯可能继续亮，而不是两个灯都熄灭。
 
 ## 应用场景
 - 高质量语音助手

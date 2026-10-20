@@ -1,145 +1,66 @@
-# 编译与烧录说明（雾岸 nano-v2 / WSL2 环境）
+# Nano-V2 编译与烧录
 
-> 本机环境：WSL2 (Ubuntu) + ESP-IDF v5.5.2（已装好）
-> 目标板：雾岸科技 Nano-V2（ESP32-S3，16MB Flash + 8MB PSRAM）
-> 串口：Windows USB → usbipd → WSL `/dev/ttyACM0`
+环境：WSL2 Ubuntu、ESP-IDF v5.5.2；设备串口 `/dev/ttyACM0`。
 
----
+## 编译、打包与烧录
 
-## 一、环境准备（一次性，已配置好）
-
-### 1. ESP-IDF 环境
-
-IDF v5.5.2 已通过 EIM 安装在 `~/.espressif/v5.5.2/`。
-**每个新开的终端都要先激活环境**：
+在新终端中执行：
 
 ```bash
+cd ~/github/xiaozhi-esp32
 . ~/.espressif/tools/activate_idf_v5.5.2.sh
-idf.py --version   # 应显示 ESP-IDF v5.5.2
+python scripts/release.py fogseek-nano-v2
+idf.py -p /dev/ttyACM0 flash monitor
 ```
 
-### 2. USB 串口（WSL2 需要 usbipd）
+脚本自动重建 `sdkconfig`、选择板型、编译、合并和打包，无需手动执行 `set-target` 或修改 PATH。
+**同版本同名 zip 已存在时会跳过构建，重新构建前请先移走旧包。**
+脚本构建成功后再烧录，串口监控按 `Ctrl+]` 退出。普通烧录保留 Wi-Fi 和设备设置。
 
-板子插在 Windows 的 USB 上，WSL2 默认看不到，需要挂载。
-在 **Windows 管理员 PowerShell** 执行：
+产物：
+
+- 固件包：`releases/v{版本}_fogseek-nano-v2.zip`
+- 合并固件：`build/merged-binary.bin`（独立烧录时写入地址 `0x0`）
+
+## 配置
+
+长期设置修改 `main/Kconfig.projbuild` 中 Nano-V2 对应的默认值，再重新构建、烧录。
+release 会重建配置，只修改本地 `sdkconfig` 或 `menuconfig` 的值不会保留。
+设备 NVS 如保存过 `wifi/ota_url`，该值优先于编译配置。
+
+| 配置 | 当前值 |
+|---|---|
+| 板型 | `fogseek-nano-v2`，ESP32-S3 |
+| OTA | `http://124.133.228.67:8002/xiaozhi/ota/` |
+| Project-Id | `zhiban` |
+| 配网 | BluFi 蓝牙配网，关闭热点配网 |
+| 唤醒词 | 你好小智、嗨小巫 |
+| 设备端 AEC | 未启用 |
+
+芯片通用默认值在 `sdkconfig.defaults*`；板级 `config.json` 提供目标芯片与构建名称。
+
+## WSL 串口挂载
+
+若看不到 `/dev/ttyACM0`，在 Windows 管理员 PowerShell 执行：
 
 ```powershell
-usbipd list                        # 找到板子的 BUSID（VID:PID 303a:1001 那行）
-usbipd bind --busid <BUSID>        # 只需做一次
+usbipd list
+usbipd bind --busid <BUSID>        # 首次使用时执行
 usbipd attach --wsl --busid <BUSID>
 ```
 
-挂载成功后 WSL 里 `ls /dev/ttyACM0` 应该存在。
+重插设备后需重新 attach。串口被占用时，先关闭其他监控程序。
 
-⚠️ **重插板子 / 换 USB 口后，需要重新执行 `usbipd attach`**（busid 可能变，重新 `usbipd list` 查）。
+## 常用操作
 
----
-
-## 二、日常开发：编译 + 烧录 + 看日志
-
-```bash
-cd ~/github/xiaozhi-esp32
-. ~/.espressif/tools/activate_idf_v5.5.2.sh
-
-idf.py build                          # 编译（增量，一般 1-2 分钟）
-idf.py -p /dev/ttyACM0 flash          # 烧录
-idf.py -p /dev/ttyACM0 erase-flash flash # 擦除整片 Flash 后重新烧录，包括清除 Wi-Fi、UUID 和其他保存的设置
-idf.py -p /dev/ttyACM0 monitor        # 看串口日志（Ctrl+] 退出）
-```
-
-**一条龙写法**（编译+烧录+自动进入日志）：
-
-```bash
-idf.py -p /dev/ttyACM0 build flash monitor
-```
-
-### 当前 sdkconfig 已配置好的内容
-
-| 配置项 | 当前值 |
+| 命令 | 用途 |
 |---|---|
-| 目标芯片 | esp32s3 |
-| 板型 | fogseek-nano-v2（`CONFIG_BOARD_TYPE_FOGSEEK_NANO_V2=y`） |
-| OTA 地址 | `http://10.17.33.203:8002/xiaozhi/ota/` |
-| 设备端回声消除 | 开（`CONFIG_USE_DEVICE_AEC=y`） |
+| `idf.py -p /dev/ttyACM0 flash monitor` | 烧录现有构建并查看日志 |
+| `idf.py -p /dev/ttyACM0 monitor` | 仅查看日志 |
+| `idf.py menuconfig` | 临时修改配置，随后执行 `idf.py build flash monitor` |
+| `idf.py -p /dev/ttyACM0 erase-flash flash` | 擦除整片 Flash 后烧录，会清除 Wi-Fi 和其他设备设置 |
 
-> 直接 `idf.py build flash` 出来的固件即为本服务器可用版本，无需重新绑定（激活凭证和 WiFi 存在 NVS 分区，烧固件不影响）。
-
----
-
-## 三、打包模式（release.py，产出给别人烧录的固件包）
-
-```bash
-. ~/.espressif/tools/activate_idf_v5.5.2.sh
-cd ~/github/xiaozhi-esp32
-python scripts/release.py fogseek-nano-v2
-```
-
-脚本会自动：选板型 → 按 `main/boards/fogseek-nano-v2/config.json` 附加配置 → 编译 → 合并 `build/merged-binary.bin` → 打包为 `releases/v{版本}_fogseek-nano-v2.zip`。
-
-**拿到 zip 的人怎么烧**：
-- Windows GUI：乐鑫 [Flash Download Tool](https://www.espressif.com/en/support/download/other-tools)，芯片选 ESP32-S3，把 zip 里的 `merged-binary.bin` 烧到地址 `0x0`
-- 网页烧录（免安装）：https://espressif.github.io/esp-launchpad/
-
-### ⚠️ release.py 的重要注意事项
-
-1. **脚本内会执行 `idf.py set-target`，重新生成 `sdkconfig`**——手动改过的 OTA 地址会被抹掉（回退官方默认 `https://api.tenclass.net/xiaozhi/ota/`），板型则由脚本自动追加不受影响。
-2. **解决办法**（让 OTA 地址永久生效）：在 `sdkconfig.defaults.esp32s3` 末尾加一行：
-   ```
-   CONFIG_OTA_URL="http://10.17.33.203:8002/xiaozhi/ota/"
-   ```
-   （该文件每次 set-target 都会生效；此文件在 git 里，不想提交就保持本地改动）
-3. **release.py 只编译打包，不烧录**。想烧自己刚打的包：打包完直接 `idf.py -p /dev/ttyACM0 flash`（build 目录就是刚编译的产物）。
-
----
-
-## 四、常用命令速查
-
-| 命令 | 用途 | 注意 |
-|---|---|---|
-| `idf.py build` | 编译 | 增量编译 |
-| `idf.py -p /dev/ttyACM0 flash` | 烧录 | 不擦 NVS，WiFi/绑定保留 |
-| `idf.py -p /dev/ttyACM0 monitor` | 串口日志 | `Ctrl+]` 退出 |
-| `idf.py -p /dev/ttyACM0 flash monitor` | 烧录+日志 | 最常用 |
-| `idf.py menuconfig` | 图形改配置 | 板型：`Xiaozhi Assistant → Board Type`；OTA 地址也在里面 |
-| `idf.py fullclean` | 清空 build 目录 | 换板型后或编译诡异报错时用，之后需重新 build |
-| `idf.py erase-flash` | **全片擦除** | ⚠️ 清掉 WiFi 密码和激活绑定，之后要重新配网+输验证码绑定，慎用 |
-
----
-
-## 五、常见问题
-
-**Q：`idf.py: command not found`**
-A：没激活环境，先 `. ~/.espressif/tools/activate_idf_v5.5.2.sh`。
-
-**Q：烧录时报 `Could not open /dev/ttyACM0`**
-A：串口被占用（别的 monitor 开着）或板子没挂载到 WSL。关掉其他串口程序；Windows 重新 `usbipd attach --wsl --busid <BUSID>`。
-
-**Q：日志/烧录中途报 `device reports readiness to read but returned no data`**
-A：WSL usbipd 断流（已知毛病）。Windows 端重新 attach，或重插板子。
-
-**Q：换板子型号**
-A：`idf.py menuconfig` → `Xiaozhi Assistant` → `Board Type` 里选；或直接改 `sdkconfig` 里的 `CONFIG_BOARD_TYPE_XXX=y`。改完建议 `idf.py fullclean` 再 build。
-
-**Q：OTA 地址在哪改**
-A：临时改：`sdkconfig` 文件里搜 `CONFIG_OTA_URL`；永久生效：写进 `sdkconfig.defaults.esp32s3`（见第三节）。改完重新编译烧录。
-
----
-
-## 六、代码/配置位置速查
-
-| 内容 | 位置 |
-|---|---|
-| 板级代码（引脚、外设初始化） | `main/boards/fogseek-nano-v2/fogseek-nano-v2.cc` |
-| 板级引脚定义 | `main/boards/fogseek-nano-v2/config.h` |
-| 板子编译附加配置 | `main/boards/fogseek-nano-v2/config.json` |
-| 编译产物 | `build/xiaozhi.bin`、`build/merged-binary.bin` |
-| 打包固件 | `releases/v{版本}_fogseek-nano-v2.zip` |
-| 当前生效配置 | `sdkconfig`（生成文件，不入库） |
-| 配置默认值 | `sdkconfig.defaults*`（入库） |
-
----
-
-## 七、小程序蓝牙配网协议
+## 小程序蓝牙配网协议
 
 小程序与音箱通过 BluFi 协议通信。下文的 JSON 是 BluFi 数据帧的业务载荷，
 不能直接把普通 JSON 字符串写入蓝牙特征值；客户端需要处理 BluFi 帧格式、分包和校验。

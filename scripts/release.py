@@ -4,6 +4,8 @@ import json
 import zipfile
 import argparse
 import re
+import shutil
+import subprocess
 from pathlib import Path
 from typing import Optional, Union
 from typing import List, Dict
@@ -40,8 +42,26 @@ def get_project_version() -> Optional[str]:
     return None
 
 
+def _run_idf(*args: str) -> int:
+    """Run ESP-IDF without relying on shell functions from environment activation."""
+    idf_path = os.environ.get("IDF_PATH")
+    idf_script = Path(idf_path) / "tools" / "idf.py" if idf_path else None
+    if idf_script is not None and idf_script.is_file():
+        python_env = os.environ.get("IDF_PYTHON_ENV_PATH")
+        python_name = "Scripts/python.exe" if os.name == "nt" else "bin/python"
+        python = str(Path(python_env) / python_name) if python_env else sys.executable
+        command = [python, str(idf_script), *args]
+    else:
+        idf_command = shutil.which("idf.py")
+        if not idf_command:
+            print("Cannot find idf.py; activate the ESP-IDF environment first.", file=sys.stderr)
+            return 1
+        command = [sys.executable, idf_command, *args]
+    return subprocess.run(command, check=False).returncode
+
+
 def merge_bin() -> None:
-    if os.system("idf.py merge-bin") != 0:
+    if _run_idf("merge-bin") != 0:
         print("merge-bin failed", file=sys.stderr)
         sys.exit(1)
 
@@ -372,7 +392,7 @@ def release(board_type: str, config_filename: str = "config.json", *, filter_nam
         os.environ.pop("IDF_TARGET", None)
 
         # Call set-target
-        if os.system(f"idf.py set-target {target}") != 0:
+        if _run_idf("set-target", target) != 0:
             print("set-target failed", file=sys.stderr)
             sys.exit(1)
 
@@ -383,7 +403,7 @@ def release(board_type: str, config_filename: str = "config.json", *, filter_nam
             for append in sdkconfig_append:
                 f.write(f"{append}\n")
         # Build with macro BOARD_NAME defined to name
-        if os.system(f"idf.py -DBOARD_NAME={name} -DBOARD_TYPE={board_type} build") != 0:
+        if _run_idf(f"-DBOARD_NAME={name}", f"-DBOARD_TYPE={board_type}", "build") != 0:
             print("build failed")
             sys.exit(1)
 
@@ -429,7 +449,8 @@ if __name__ == "__main__":
         sys.exit(0)
 
     # Compile mode
-    board_type_input: str = args.board
+    # Historical command documented in the Nano-V2 board README.
+    board_type_input: str = {"fogseek-Nano": "fogseek-nano-v2"}.get(args.board, args.board)
     name_filter: Optional[str] = args.name
 
     # Check board_type in CMakeLists
